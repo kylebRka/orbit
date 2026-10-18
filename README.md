@@ -5,7 +5,7 @@
 <p align="center">macOS 15+ · Swift + AppKit + SwiftUI · Local processing</p>
 <p align="center"><a href="README.ru.md">Русская версия</a> · <a href="docs/INTERACTION.md">Interaction & architecture</a> · <a href="docs/ROADMAP.md">Roadmap</a></p>
 
-<p align="center"><img src="docs/preview.png" width="900" alt="Orbit for macOS"></p>
+<p align="center"><img src="docs/preview-en.jpg" width="900" alt="Orbit interface in English"></p>
 
 ## What it does
 
@@ -18,7 +18,7 @@ Orbit brings a contextual conversion wheel to your files. It reads the actual co
 - A background editor with gradient, padding, rounded corners and shadow.
 - A logo on backgrounds: Orbit by default, bottom right; disable it, import your own image, or choose any corner.
 - Blue/cyan branding, with interactive highlights following the macOS accent color. Light/dark appearance follows macOS.
-- System language by default, with an immediate English / Russian override in Settings. Some technical errors use English. See the [settings preview](docs/settings.png).
+- System language by default, with an immediate English / Russian override in Settings. Some technical errors use English. See the [settings preview](docs/settings-en.jpg).
 - Launch at login using the macOS login-item service; starts quietly in the menu bar.
 - Convert from Finder/desktop without opening Orbit or stealing focus; background errors are available from the menu bar.
 - Cancel media conversion, reveal results in Finder, and view the last ten results during the current session.
