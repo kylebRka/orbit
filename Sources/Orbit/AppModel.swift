@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import ApplicationServices
+import ServiceManagement
 import OrbitCore
 
 @MainActor
@@ -10,6 +11,11 @@ final class AppModel: ObservableObject {
     @Published var busy = false
     @Published var result: URL?
     @Published var error: String?
+    @Published var showingError = false
+    @Published var loginStatus = SMAppService.mainApp.status
+    @Published var language = AppLanguage.current {
+        didSet { UserDefaults.standard.set(language.rawValue,forKey:"orbitLanguage"); languageChanged?() }
+    }
     @Published var history: [URL] = []
     @Published var gesturePaused = false
     @Published var accessibility = AXIsProcessTrusted()
@@ -19,6 +25,7 @@ final class AppModel: ObservableObject {
     var showWindow: (() -> Void)?
     var showWheel: ((FileInspection) -> Void)?
     var permissionChanged: (() -> Void)?
+    var languageChanged: (() -> Void)?
     var editor: NSWindow?
     private var task: Task<Void, Never>?
     private var loadID = UUID()
@@ -34,7 +41,7 @@ final class AppModel: ObservableObject {
     func load(_ url: URL) {
         guard !busy else { return }
         let id = UUID(); loadID = id
-        inspecting = true; error = nil; result = nil
+        inspecting = true; file = nil; selectedFormat = nil; error = nil; result = nil; showingError = false
         Task {
             do {
                 let inspected = try await Task.detached(priority:.userInitiated) { try await ConversionEngine.inspect(url) }.value
@@ -42,18 +49,20 @@ final class AppModel: ObservableObject {
                 file = inspected; selectedFormat = inspected.formats.first; inspecting = false
             } catch {
                 guard loadID == id else { return }
-                inspecting = false; self.error = error.localizedDescription
+                inspecting = false; reportError(error)
             }
         }
     }
 
-    func convert(_ format: OutputFormat, file source: FileInspection? = nil) {
+    func convert(_ format: OutputFormat, file source: FileInspection? = nil, background:Bool = false) {
         guard !busy, let source = source ?? file else { return }
-        busy = true; result = nil; error = nil
+        loadID = UUID(); inspecting = false
+        busy = true; result = nil; error = nil; showingError = false
         file = source; selectedFormat = format
         let runner = CommandRunner(); self.runner = runner
         task = Task {
             do {
+                try Task.checkCancellation()
                 let worker = Task.detached(priority:.userInitiated) {
                     try await ConversionEngine.convert(source, to:format, runner:runner)
                 }
@@ -61,16 +70,23 @@ final class AppModel: ObservableObject {
                     try await worker.value
                 }, onCancel: { worker.cancel(); runner.cancel() })
                 if !Task.isCancelled { completed(output) }
-            } catch is CancellationError {} catch { self.error = error.localizedDescription; showWindow?() }
+            } catch is CancellationError {} catch { reportError(error,present:!background) }
             busy = false; self.runner = nil; task = nil
         }
     }
 
     func completed(_ output: URL) {
         result = output; history.insert(output, at:0); history = Array(history.prefix(10))
-        showWindow?()
     }
 
+    func presentLastError() { showWindow?(); showingError = error != nil }
+
+    func reportError(_ error:Error,present:Bool = true) {
+        self.error = error.localizedDescription
+        showingError = present
+    }
+
+    func cancelAndWait() async { cancel(); await task?.value }
     func cancel() { runner?.cancel(); task?.cancel() }
     func reveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
 
@@ -83,11 +99,24 @@ final class AppModel: ObservableObject {
     func requestFinder() {
         Task {
             do { _ = try await FinderSelection.read(); finderAllowed = true; UserDefaults.standard.set(true,forKey:"finderEnabled") }
-            catch { self.error = error.localizedDescription }
+            catch { reportError(error) }
         }
     }
 
+    func setLoginEnabled(_ enabled:Bool) {
+        do {
+            if enabled && SMAppService.mainApp.status != .enabled {
+                try SMAppService.mainApp.register()
+            } else if !enabled && SMAppService.mainApp.status != .notRegistered {
+                try SMAppService.mainApp.unregister()
+            }
+            loginStatus = SMAppService.mainApp.status
+            if loginStatus == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        } catch { loginStatus = SMAppService.mainApp.status; reportError(error) }
+    }
+
     func refreshPermissions() {
+        loginStatus = SMAppService.mainApp.status
         accessibility = AXIsProcessTrusted()
         permissionChanged?()
     }

@@ -94,16 +94,23 @@ final class WheelView: NSView {
         default: super.keyDown(with:event)
         }
     }
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { track(convert(sender.draggingLocation, from:nil)); return .copy }
+    func acceptsFiles(_ urls:[URL]) -> Bool {
+        urls.count == 1 && urls.first?.standardizedFileURL == file?.url.standardizedFileURL
+    }
+    private func draggedFiles(_ sender:NSDraggingInfo) -> [URL] {
+        sender.draggingPasteboard.readObjects(forClasses:[NSURL.self],options:[.urlReadingFileURLsOnly:true]) as? [URL] ?? []
+    }
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { draggingUpdated(sender) }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard acceptsFiles(draggedFiles(sender)) else { hovered=nil; return [] }
         track(convert(sender.draggingLocation, from:nil)); return hovered == nil ? [] : .copy
     }
     override func draggingExited(_ sender: NSDraggingInfo?) { hovered = nil }
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { hovered != nil }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { hovered != nil && acceptsFiles(draggedFiles(sender)) }
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         track(convert(sender.draggingLocation, from:nil))
-        let files = sender.draggingPasteboard.readObjects(forClasses:[NSURL.self], options:[.urlReadingFileURLsOnly:true]) as? [URL] ?? []
-        guard let hovered, files.count == 1 else { onCancel?(); return false }
+        let files = draggedFiles(sender)
+        guard let hovered, acceptsFiles(files) else { onCancel?(); return false }
         onDrop?(files, hovered); return true
     }
 

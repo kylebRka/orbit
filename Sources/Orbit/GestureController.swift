@@ -17,6 +17,7 @@ final class GestureController {
     private var shiftDown = false
     private var dragging = false
     private var actions = false
+    private var background = false
     private var generation = UUID()
     private var timeout: Timer?
     private var resolving = false
@@ -53,7 +54,11 @@ final class GestureController {
         }
         if model.accessibility && global == nil {
             global=NSEvent.addGlobalMonitorForEvents(matching:[.flagsChanged,.mouseMoved,.leftMouseDown,.leftMouseDragged,.leftMouseUp,.keyDown]) { [weak self] event in
-                MainActor.assumeIsolated { self?.handle(event) }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.handle(event)
+                    if self.panel.isVisible && event.type == .keyDown && [48,53].contains(event.keyCode) { self.wheel.keyDown(with:event) }
+                }
             }
         }
         if local == nil {
@@ -103,10 +108,6 @@ final class GestureController {
         if event.type == .leftMouseUp && dragging {
             timeout=Timer.scheduledTimer(withTimeInterval:0.15,repeats:false) { [weak self] _ in MainActor.assumeIsolated { self?.dismiss() } }
         }
-        if event.type == .keyDown && event.window !== panel {
-            if event.keyCode == 53 { dismiss() }
-            if event.keyCode == 48 { toggle() }
-        }
     }
 
     private func resolveDrag() {
@@ -131,20 +132,21 @@ final class GestureController {
                 let file=try await Task.detached(priority:.userInitiated) { try await ConversionEngine.inspect(url) }.value
                 guard generation == token, shiftDown else { return }
                 present(file,at:anchor,dragging:dragging)
-            } catch { model.error=error.localizedDescription }
+            } catch { model.reportError(error,present:false) }
         }
     }
 
     func present(_ file:FileInspection, at point:NSPoint, dragging:Bool) {
         guard !model.busy, !file.formats.isEmpty else { return }
         timeout?.invalidate(); self.dragging=dragging; wheel.dragging=dragging; actions=false
-        wheel.file=file; wheel.items=file.formats.map(WheelItem.init); wheel.hovered=nil
+        background = NSWorkspace.shared.frontmostApplication?.processIdentifier != ProcessInfo.processInfo.processIdentifier
         let screen=NSScreen.screens.first { NSMouseInRect(point,$0.frame,false) } ?? NSScreen.main!
         let area=screen.visibleFrame.insetBy(dx:8,dy:8)
         // Keep the center under the pointer unless the display edge leaves insufficient space.
         let origin=NSPoint(x:min(max(point.x-208,area.minX),area.maxX-416),
                            y:min(max(point.y-258,area.minY),area.maxY-466))
         panel.setFrameOrigin(origin)
+        wheel.file=file; wheel.items=file.formats.map(WheelItem.init); wheel.hovered=nil
         panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(wheel)
     }
 
@@ -172,8 +174,8 @@ final class GestureController {
         guard let file=wheel.file else { return }
         if item.action == "formats" { toggle(); return }
         dismiss()
-        if let format=item.format { model.convert(format,file:file) }
-        else if let action=item.action { ImageTools.perform(action,file:file,model:model) }
+        if let format=item.format { model.convert(format,file:file,background:background) }
+        else if let action=item.action { ImageTools.perform(action,file:file,model:model,background:background) }
     }
     func dismiss() { timeout?.invalidate(); panel.orderOut(nil); wheel.hovered=nil; generation=UUID(); resolving=false }
 }

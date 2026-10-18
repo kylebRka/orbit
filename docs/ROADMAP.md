@@ -16,7 +16,6 @@ These are ideas, not features promised by the current build. Keep conversion one
 | Saved backgrounds / Пресеты фона | Reuse background and logo settings across sessions / Сохранять фон и настройки логотипа между запусками |
 | Undo a result / Отмена результата | Move only the generated output to Trash, after checking its identity / Отправлять в корзину только созданный результат после проверки |
 | Signed distribution / Подписанный релиз | Developer ID, notarization, a universal binary and an update channel / Developer ID, нотариализация, универсальная сборка и обновления |
-| Login item / Запуск при входе | Explicit opt-in using ServiceManagement / Только по желанию пользователя через ServiceManagement |
 | Finder Quick Action / Быстрое действие Finder | A conventional alternative to the global gesture / Привычная альтернатива глобальному жесту |
 
 The current build intentionally avoids accounts, servers, automatic uploads and conversion of unrelated content types. Document conversion with layout fidelity requires a separate engine; renaming an extension is never a conversion.

@@ -5,7 +5,7 @@ import OrbitCore
 
 @MainActor
 enum ImageTools {
-    static func perform(_ action:String, file:FileInspection, model:AppModel) {
+    static func perform(_ action:String, file:FileInspection, model:AppModel, background:Bool = false) {
         do {
             if action == "metadata" {
                 var lines=[file.url.lastPathComponent,file.detail,"Type: \(file.kind.rawValue)"]
@@ -21,7 +21,7 @@ enum ImageTools {
             if action == "preview" {
                 let configuration=NSWorkspace.OpenConfiguration()
                 NSWorkspace.shared.open([file.url],withApplicationAt:URL(fileURLWithPath:"/System/Applications/Preview.app"),configuration:configuration) { _,error in
-                    if let error { Task { @MainActor in model.error=error.localizedDescription } }
+                    if let error { Task { @MainActor in model.reportError(error,present:!background) } }
                 }; return
             }
             let image=try ConversionEngine.loadImage(file.url)
@@ -35,7 +35,7 @@ enum ImageTools {
             if action == "compress" { try save(image,file:file,format:.jpg,suffix:"-compressed",model:model,quality:0.65); return }
             show(ImageEditor(image:image,file:file,background:action == "background",model:model),
                  title:action == "background" ? L("Add background","Добавить фон") : L("Crop image","Обрезать изображение"),model:model)
-        } catch { model.error=error.localizedDescription; model.showWindow?() }
+        } catch { model.reportError(error,present:!background) }
     }
 
     static func save(_ image:CGImage,file:FileInspection,format:OutputFormat,suffix:String,model:AppModel,quality:Double=0.9) throws {
@@ -56,6 +56,7 @@ enum ImageTools {
         let window=NSWindow(contentRect:NSRect(x:0,y:0,width:620,height:720),styleMask:[.titled,.closable],backing:.buffered,defer:false)
         window.title=title; window.isReleasedWhenClosed=false
         window.contentView=NSHostingView(rootView:view)
+        NSApp.setActivationPolicy(.regular)
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps:true)
         model.editor=window
     }
@@ -66,6 +67,7 @@ struct ImageEditor:View {
     let file:FileInspection
     let background:Bool
     @ObservedObject var model:AppModel
+    @State private var editorError:String?
     @State private var padding=0.12
     @State private var corners=0.04
     @State private var shadow=0.04
@@ -143,6 +145,10 @@ struct ImageEditor:View {
                 Button(L("Save image","Сохранить")) { save() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width:620,height:background ? 760 : 620)
+            .environment(\.locale,model.language.locale)
+            .alert(L("Cannot save image","Не удалось сохранить изображение"),isPresented:Binding(get:{ editorError != nil },set:{ if !$0 { editorError=nil } })) {
+                Button("OK") { editorError=nil }
+            } message: { Text(editorError ?? "") }
             .onChange(of:cropWidth) { _,value in cropX=min(cropX,1-value) }
             .onChange(of:cropHeight) { _,value in cropY=min(cropY,1-value) }
     }
@@ -154,7 +160,7 @@ struct ImageEditor:View {
     func chooseLogo() {
         let panel=NSOpenPanel(); panel.allowedContentTypes=[.image]; panel.allowsMultipleSelection=false
         if panel.runModal() == .OK, let url=panel.url {
-            do { customLogo=try ConversionEngine.loadImage(url) } catch { model.error=error.localizedDescription }
+            do { customLogo=try ConversionEngine.loadImage(url) } catch { editorError=error.localizedDescription }
         }
     }
 
@@ -210,6 +216,6 @@ struct ImageEditor:View {
                 guard let cropped=image.cropping(to:rect) else { throw OrbitError.message("Invalid crop area.") }; output=cropped
             }
             try ImageTools.save(output,file:file,format:.png,suffix:background ? "-background" : "-cropped",model:model)
-        } catch { model.error=error.localizedDescription; model.showWindow?() }
+        } catch { editorError=error.localizedDescription }
     }
 }

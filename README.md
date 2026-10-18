@@ -18,7 +18,9 @@ Orbit brings a contextual conversion wheel to your files. It reads the actual co
 - A background editor with gradient, padding, rounded corners and shadow.
 - A logo on backgrounds: Orbit by default, bottom right; disable it, import your own image, or choose any corner.
 - Blue/cyan branding, with interactive highlights following the macOS accent color. Light/dark appearance follows macOS.
-- Russian and English interface chosen from your preferred system language. Some technical errors use English.
+- System language by default, with an immediate English / Russian override in Settings. Some technical errors use English. See the [settings preview](docs/settings.png).
+- Launch at login using the macOS login-item service; starts quietly in the menu bar.
+- Convert from Finder/desktop without opening Orbit or stealing focus; background errors are available from the menu bar.
 - Cancel media conversion, reveal results in Finder, and view the last ten results during the current session.
 
 ## Run
@@ -34,7 +36,7 @@ brew install ffmpeg
 open dist/Orbit.app
 ```
 
-Keep the app at a stable location before enabling permissions; moving/rebuilding an ad-hoc signed app can require granting them again. You can move `dist/Orbit.app` into Applications yourself.
+Keep the app at a stable location before enabling permissions; moving/rebuilding an ad-hoc signed app can require granting them again. Move `dist/Orbit.app` into Applications before enabling **Settings → Launch at login**.
 
 For development, open `Package.swift` in Xcode. Prefer the app bundle for Finder automation; running a bare executable may attribute permissions to your terminal or development tool.
 
@@ -72,7 +74,7 @@ Known media input extensions: MOV, MP4, M4V, MKV, WEBM, AVI, MPG, MPEG, MP3, M4A
 - Image conversion applies EXIF orientation and creates fresh metadata. It does not preserve EXIF/GPS fields. JPG/BMP flatten transparency onto white. JPEG compression is lossy and is saved only when the result is smaller.
 - PDF page images are rendered at up to 2× page points, capped at 4096 pixels on the longer side. Image inputs above 100 megapixels, animated/multipage images and encrypted PDFs are rejected. Scanned PDFs need external OCR.
 - Background output is PNG, capped at 8192 pixels per side; very large images may be reduced. The logo becomes part of the exported pixels.
-- Recent results stay in memory until quit. Only the Finder integration toggle is persisted.
+- Recent results stay in memory until quit. Only the Finder integration and language preferences are persisted. macOS manages the login-item preference.
 - **Open in Preview** opens the source in Apple's editor. Saving there follows Preview's own behavior; it is not a protected Orbit conversion.
 
 ## Build, test, package
@@ -83,22 +85,23 @@ swift test
 ./scripts/package.sh   # dist/Orbit-macOS.zip
 ```
 
-The automated tests cover menu geometry, compatible formats, silent video, actual MOV → MP4/MP3/M4A/WAV/FLAC conversion, image formats, PDF pages, invalid inputs, cancellation and preservation of existing files. Media tests skip when FFmpeg is absent. Finder permissions, native drag sessions and editor UI require a manual pass; see [the checklist](docs/INTERACTION.md#manual-checklist).
+The 23 automated tests include app behavior regressions (background focus, errors, stale selections, language and login launch detection) plus menu geometry, compatible formats, silent video, actual MOV → MP4/MP3/M4A/WAV/FLAC conversion, image formats, PDF pages, invalid inputs, cancellation and preservation of existing files. Media tests skip when FFmpeg is absent. Finder permissions, native drag sessions and editor UI require a manual pass; see [the checklist](docs/INTERACTION.md#manual-checklist).
 
-Builds target the architecture of the Mac doing the build. The included build script uses local ad-hoc signing. Public downloads need your Apple Developer ID signing and notarization; ad-hoc builds are intended for local development, and Gatekeeper may block a downloaded copy. The project has no paid-service dependency and bundles no third-party binaries.
+Builds target the architecture of the Mac doing the build. The build script signs the local bundle. The project has no paid-service dependency and bundles no third-party binaries.
 
 ## GitHub
 
 The repository includes a macOS CI workflow, MIT license, a changelog, issue-ready development notes and an ignore file for builds and signing credentials. CI runs tests and uploads an app ZIP as an artifact; it does not publish a GitHub Release or notarize the app.
 
-Create an empty repository on GitHub, then connect this local repository:
+Source: [kylebRka/orbit](https://github.com/kylebRka/orbit). App downloads: [Releases](https://github.com/kylebRka/orbit/releases).
 
 ```sh
-git remote add origin <YOUR_REPOSITORY_URL>
-git push -u origin main
+git clone https://github.com/kylebRka/orbit.git
+cd orbit
+./scripts/build.sh
 ```
 
-Before distributing a release, choose your permanent bundle identifier, sign/notarize the app and review the licenses of any FFmpeg build you decide to bundle. FFmpeg installed separately with Homebrew is not redistributed by this project.
+FFmpeg installed separately with Homebrew is not redistributed by this project. Review the licenses of any FFmpeg build you decide to bundle.
 
 ## License
 

@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import OrbitCore
+import ServiceManagement
 
 struct MainView: View {
     @ObservedObject var model:AppModel
@@ -37,8 +38,9 @@ struct MainView: View {
                 Task { @MainActor in model.section="convert"; model.load(url) }
             }; return true
         }
-        .alert(L("Orbit needs your attention","Orbit: требуется внимание"),isPresented:Binding(get:{ model.error != nil },set:{ if !$0 { model.error=nil } })) {
-            Button("OK") { model.error=nil }
+        .environment(\.locale,model.language.locale)
+        .alert(L("Orbit needs your attention","Orbit: требуется внимание"),isPresented:$model.showingError) {
+            Button("OK") { model.showingError=false }
         } message: { Text(model.error ?? "") }
     }
 
@@ -127,6 +129,20 @@ struct MainView: View {
     var settings:some View {
         Form {
             Section { Text("Orbit").font(.largeTitle.weight(.semibold)); Text(L("Small by design. Right at home on your Mac.","Маленькое приложение. Привычное на вашем Mac.")).foregroundStyle(.secondary) }
+            Section(L("General","Основные")) {
+                Picker(L("Language","Язык"),selection:$model.language) {
+                    Text(L("System language","Язык системы")).tag(AppLanguage.system)
+                    Text("English").tag(AppLanguage.english)
+                    Text("Русский").tag(AppLanguage.russian)
+                }
+                Toggle(L("Launch at login","Запускать при входе в систему"),isOn:Binding(
+                    get:{ model.loginStatus == .enabled || model.loginStatus == .requiresApproval },
+                    set:{ model.setLoginEnabled($0) }))
+                Text(L("Starts quietly in the menu bar, without opening the main window.","Запускается в строке меню, без открытия главного окна.")).font(.caption).foregroundStyle(.secondary)
+                if model.loginStatus == .requiresApproval {
+                    Button(L("Allow in System Settings…","Разрешить в системных настройках…")) { SMAppService.openSystemSettingsLoginItems() }
+                }
+            }
             Section(L("Finder gesture","Жест в Finder")) {
                 Text(L("Grant these permissions to use Shift in Finder. Choosing or dropping a file into Orbit works without them.","Разрешения нужны для Shift в Finder. Выбор файла и перетаскивание в окно Orbit работают без них."))
                 HStack { Label(L("Accessibility · observe Shift","Универсальный доступ · клавиша Shift"),systemImage:model.accessibility ? "checkmark.circle.fill" : "circle"); Spacer(); Button(L("Enable…","Включить…")) { model.requestAccessibility() } }
@@ -145,7 +161,7 @@ struct MainView: View {
                 Label(L("Follows the macOS accent color and appearance","Системный акцентный цвет, светлая и тёмная темы"),systemImage:"circle.lefthalf.filled")
                 Text(L("No uploads, telemetry or stored file history. The last ten results are kept in memory until you quit. Originals are never replaced. Multi-page PDF images are saved to a new folder.","Без загрузок в сеть, телеметрии и истории на диске. Последние десять результатов хранятся в памяти до выхода. Исходники не заменяются. Страницы PDF сохраняются в новую папку."))
             }
-            Section { Text("Orbit 0.1.0 · macOS 15+").foregroundStyle(.secondary) }
+            Section { Text("Orbit 0.2.0 · macOS 15+").foregroundStyle(.secondary) }
         }.formStyle(.grouped).padding(.top,20)
     }
 

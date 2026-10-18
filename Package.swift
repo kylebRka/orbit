@@ -8,6 +8,7 @@ let package = Package(
     targets: [
         .target(name: "OrbitCore"),
         .executableTarget(name: "Orbit", dependencies: ["OrbitCore"]),
-        .testTarget(name: "OrbitCoreTests", dependencies: ["OrbitCore"])
+        .testTarget(name: "OrbitCoreTests", dependencies: ["OrbitCore"]),
+        .testTarget(name: "OrbitTests", dependencies: ["Orbit", "OrbitCore"])
     ]
 )

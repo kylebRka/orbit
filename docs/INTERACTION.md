@@ -37,7 +37,9 @@ On macOS 26+, `NSGlassEffectView` with the clear style supplies native Liquid Gl
 
 No package dependencies. System frameworks: AppKit, SwiftUI, ImageIO, CoreGraphics, UniformTypeIdentifiers, PDFKit, AVFoundation and ApplicationServices. FFmpeg is an optional external executable, invoked without a shell; filenames are passed as individual arguments. Remote input protocols are not enabled. No server runs in the background.
 
-The app reads Finder's selection using a fixed AppleScript with no path interpolation. Accessibility permission enables observation of global key events. Orbit does not synthesize keystrokes, read clipboard contents or record the screen. It only acts on Shift when Finder is in the foreground and the integration is enabled. On-disk history is not maintained.
+The app reads Finder's selection using a fixed AppleScript with no path interpolation. Accessibility permission enables observation of global key events. Orbit does not synthesize keystrokes, read clipboard contents or record the screen. It only acts on Shift when Finder is in the foreground and the integration is enabled. On-disk history is not maintained. Conversion completion updates the result and the menu-bar status without activating the app. Background failures stay in the menu bar until the user chooses to view them. Normal window operations still show errors in the current UI.
+
+`SMAppService.mainApp` manages launch at login. Startup Apple Events identify login launches so the app leaves its main window closed. An explicit Settings language choice is persisted; System is the default.
 
 Dynamic `NSColor.controlAccentColor` and SwiftUI accent styling follow the system accent, including color-change notifications for the wheel. System background/text colors follow the current appearance. The icon retains the app's blue/cyan identity. Animation is not required to use the interface. Standard controls and keyboard alternatives accompany the custom wheel.
 
@@ -61,6 +63,8 @@ Use disposable sample files and grant permissions yourself. Automated checks do 
 - [ ] Keep Orbit's logo at bottom right; turn it off; move it to the other corners; import a transparent custom logo. Confirm the saved PNG matches the preview.
 - [ ] Convert a multi-page PDF to images and a text PDF to TXT; reject a scanned PDF with no text.
 - [ ] Convert an audio/video file and cancel a longer media job. Confirm no output is published after cancellation.
+- [ ] Switch System / English / Russian; check both the main window and menu-bar commands. Enable Launch at login in Settings.
+- [ ] Convert from Finder/desktop; confirm the active app does not change on completion or error.
 - [ ] Close the main window, reopen from the menu bar, pause the gesture and quit.
 
 ## Модель взаимодействия
