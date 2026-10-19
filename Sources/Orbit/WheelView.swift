@@ -25,11 +25,14 @@ final class WheelView: NSView {
     var hovered: Int? { didSet { needsDisplay = true } }
     var file: FileInspection? { didSet { needsDisplay = true } }
     var demo = false
+    var page=WheelPage.formats { didSet { needsDisplay=true; updateAccessibilityItems() } }
+    private var center:NSPoint { NSPoint(x:208,y:demo ? 208 : 258) }
     var dragging = false { didSet { needsDisplay=true } }
     var onSelect: ((WheelItem) -> Void)?
     var onDrop: (([URL], Int) -> Void)?
     var onCancel: (() -> Void)?
     var onToggle: (() -> Void)?
+    var onPage: ((WheelPage) -> Void)?
     private var tracking: NSTrackingArea?
 
     override init(frame: NSRect) {
@@ -37,7 +40,7 @@ final class WheelView: NSView {
         registerForDraggedTypes([.fileURL])
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(L("Conversion wheel. Use arrow keys, Return to choose, Tab for tools, Escape to cancel.", "Меню конвертации. Стрелки — выбор, Enter — запуск, Tab — инструменты, Escape — отмена."))
+        setAccessibilityLabel(L("File wheel. Shift for formats, Command for tools, Control for actions. Arrow keys and Return to choose, Tab for next menu, Escape to cancel.", "Меню файла. Shift — форматы, Command — инструменты, Control — действия. Стрелки и Enter — выбор, Tab — следующее меню, Escape — отмена."))
         NotificationCenter.default.addObserver(self, selector:#selector(colorsChanged), name:NSColor.systemColorsDidChangeNotification, object:nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -53,7 +56,7 @@ final class WheelView: NSView {
             element.setAccessibilityLabel(item.title)
             element.setAccessibilityParent(self)
             let angle=(-90+Double(index)*360/Double(items.count)) * .pi/180
-            let rect=NSRect(x:208+118*cos(angle)-32,y:208+118*sin(angle)-24,width:64,height:48)
+            let rect=NSRect(x:208+118*cos(angle)-32,y:center.y+118*sin(angle)-24,width:64,height:48)
             element.setAccessibilityFrame(window?.convertToScreen(convert(rect,to:nil)) ?? .zero)
             element.press = { [weak self] in self?.onSelect?(item) }
             elements.append(element)
@@ -61,11 +64,21 @@ final class WheelView: NSView {
         let toggle=WheelAccessibilityItem()
         toggle.setAccessibilityRole(.button)
         toggle.setAccessibilityEnabled(true)
-        toggle.setAccessibilityLabel(L("Switch formats and tools","Переключить форматы и инструменты"))
+        toggle.setAccessibilityLabel(L("Next file menu","Следующее меню файла"))
         toggle.setAccessibilityParent(self)
-        toggle.setAccessibilityFrame(window?.convertToScreen(convert(NSRect(x:151,y:151,width:114,height:114),to:nil)) ?? .zero)
+        toggle.setAccessibilityFrame(window?.convertToScreen(convert(NSRect(x:151,y:center.y-57,width:114,height:114),to:nil)) ?? .zero)
         toggle.press = { [weak self] in self?.onToggle?() }
         elements.append(toggle)
+        for item in WheelPage.allCases {
+            let button=WheelAccessibilityItem()
+            button.setAccessibilityRole(.button); button.setAccessibilityEnabled(true)
+            button.setAccessibilityLabel(item.key+" "+item.title)
+            button.setAccessibilityParent(self)
+            let rect=NSRect(x:10+132*item.rawValue,y:8,width:132,height:36)
+            button.setAccessibilityFrame(window?.convertToScreen(convert(rect,to:nil)) ?? .zero)
+            button.press={ [weak self] in self?.onPage?(item) }
+            elements.append(button)
+        }
         setAccessibilityChildren(elements)
     }
     override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); needsDisplay = true }
@@ -75,12 +88,17 @@ final class WheelView: NSView {
         addTrackingArea(tracking!); super.updateTrackingAreas()
     }
     func track(_ point: NSPoint) {
-        let selected = RadialGeometry.sector(x:point.x - 208, y:point.y - 208, count:items.count)
+        let selected = RadialGeometry.sector(x:point.x - center.x, y:point.y - center.y, count:items.count)
         if hovered != selected { hovered = selected }
     }
     override func mouseMoved(with event: NSEvent) { track(convert(event.locationInWindow, from:nil)) }
     override func mouseDown(with event: NSEvent) {
-        track(convert(event.locationInWindow, from:nil))
+        let point=convert(event.locationInWindow,from:nil)
+        if !demo && (8...44).contains(point.y), (10...406).contains(point.x) {
+            onPage?(WheelPage(rawValue:min(2,Int((point.x-10)/132)))!); return
+        }
+        if hypot(point.x-center.x,point.y-center.y) < 57 { onToggle?(); return }
+        track(point)
         if let hovered, items.indices.contains(hovered) { onSelect?(items[hovered]) }
         else { onCancel?() }
     }
@@ -116,8 +134,9 @@ final class WheelView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        let center = NSPoint(x:208,y:208)
-        let outer = NSBezierPath(ovalIn:NSRect(x:28,y:28,width:360,height:360))
+        let center = self.center
+        if !demo { drawMenuTabs() }
+        let outer = NSBezierPath(ovalIn:NSRect(x:28,y:center.y-180,width:360,height:360))
         NSColor.windowBackgroundColor.withAlphaComponent(0.04).setFill(); outer.fill()
         NSColor.white.withAlphaComponent(0.36).setStroke(); outer.lineWidth = 1; outer.stroke()
         guard !items.isEmpty else { return }
@@ -160,22 +179,31 @@ final class WheelView: NSView {
             let attrs: [NSAttributedString.Key:Any] = [.font:NSFont.systemFont(ofSize:10,weight:.semibold), .foregroundColor:color, .paragraphStyle:paragraph]
             (item.title as NSString).draw(in:NSRect(x:point.x-44,y:point.y+10,width:88,height:28),withAttributes:attrs)
         }
-        let middle = NSBezierPath(ovalIn:NSRect(x:151,y:151,width:114,height:114))
+        let middle = NSBezierPath(ovalIn:NSRect(x:151,y:center.y-57,width:114,height:114))
         NSColor.controlBackgroundColor.withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? 0.95 : 0.22).setFill(); middle.fill()
         if let file {
             let icon = NSWorkspace.shared.icon(forFile:file.url.path)
-            icon.draw(in:NSRect(x:186,y:165,width:44,height:44))
+            icon.draw(in:NSRect(x:186,y:center.y-43,width:44,height:44))
         }
         let paragraph = NSMutableParagraphStyle(); paragraph.alignment = .center; paragraph.lineBreakMode = .byTruncatingTail
         let title = hovered.flatMap { items.indices.contains($0) ? items[$0].title : nil } ?? "ORBIT"
-        (title as NSString).draw(in:NSRect(x:156,y:217,width:104,height:20),withAttributes:[.font:NSFont.systemFont(ofSize:11,weight:.bold), .foregroundColor:NSColor.labelColor, .paragraphStyle:paragraph])
+        (title as NSString).draw(in:NSRect(x:156,y:center.y+9,width:104,height:20),withAttributes:[.font:NSFont.systemFont(ofSize:11,weight:.bold), .foregroundColor:NSColor.labelColor, .paragraphStyle:paragraph])
         if !demo {
             let filename = file?.url.lastPathComponent ?? ""
-            (filename as NSString).draw(in:NSRect(x:28,y:401,width:360,height:20),withAttributes:[.font:NSFont.systemFont(ofSize:12,weight:.medium), .foregroundColor:NSColor.labelColor,.paragraphStyle:paragraph])
-            let hint = dragging ? L("Drop onto a format · Tab tools · Esc cancel", "Бросьте файл в сектор · Tab — инструменты · Esc — отмена") : L("Release Shift to convert · Tab tools · Esc cancel", "Отпустите Shift · Tab — инструменты · Esc — отмена")
-            (hint as NSString).draw(in:NSRect(x:4,y:426,width:408,height:30),withAttributes:[.font:NSFont.systemFont(ofSize:10),.foregroundColor:NSColor.secondaryLabelColor,.paragraphStyle:paragraph])
+            (filename as NSString).draw(in:NSRect(x:28,y:451,width:360,height:20),withAttributes:[.font:NSFont.systemFont(ofSize:12,weight:.medium), .foregroundColor:NSColor.labelColor,.paragraphStyle:paragraph])
+            let hint = dragging ? L("Drop onto a sector · Tab next menu · Esc cancel", "Бросьте в сектор · Tab — другое меню · Esc — отмена") : L("Release Shift or click · Tab next menu · Esc cancel", "Отпустите Shift или нажмите · Tab — меню · Esc — отмена")
+            (hint as NSString).draw(in:NSRect(x:4,y:476,width:408,height:30),withAttributes:[.font:NSFont.systemFont(ofSize:10),.foregroundColor:NSColor.secondaryLabelColor,.paragraphStyle:paragraph])
         }
     }
+    private func drawMenuTabs() {
+        let paragraph=NSMutableParagraphStyle(); paragraph.alignment = .center
+        for item in WheelPage.allCases {
+            let rect=NSRect(x:10+132*item.rawValue,y:8,width:132,height:36)
+            if page == item { NSColor.controlAccentColor.withAlphaComponent(0.16).setFill(); NSBezierPath(roundedRect:rect.insetBy(dx:3,dy:3),xRadius:9,yRadius:9).fill() }
+            ((item.key+" "+item.title) as NSString).draw(in:rect.insetBy(dx:2,dy:10),withAttributes:[.font:NSFont.systemFont(ofSize:11,weight:page == item ? .semibold : .regular),.foregroundColor:page == item ? NSColor.controlAccentColor : NSColor.labelColor,.paragraphStyle:paragraph])
+        }
+    }
+
 }
 
 struct WheelPreview: NSViewRepresentable {

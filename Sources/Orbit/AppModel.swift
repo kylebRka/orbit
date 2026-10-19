@@ -56,20 +56,34 @@ final class AppModel: ObservableObject {
 
     func convert(_ format: OutputFormat, file source: FileInspection? = nil, background:Bool = false) {
         guard !busy, let source = source ?? file else { return }
+        run(source,format:format,background:background) { runner in
+            try await ConversionEngine.convert(source,to:format,runner:runner)
+        }
+    }
+
+    func trim(_ source:FileInspection, range:MediaRange, format:OutputFormat, muted:Bool) {
+        run(source,format:format,background:true,closeEditor:true) { runner in
+            try await MediaEditing.trim(source,range:range,format:format,muted:muted,runner:runner)
+        }
+    }
+
+    private func run(_ source:FileInspection, format:OutputFormat, background:Bool, closeEditor:Bool = false,
+                     operation:@escaping @Sendable (CommandRunner) async throws -> URL) {
+        guard !busy else { return }
         loadID = UUID(); inspecting = false
         busy = true; result = nil; error = nil; showingError = false
-        file = source; selectedFormat = format
+        file = source; selectedFormat = source.formats.contains(format) ? format : source.formats.first
         let runner = CommandRunner(); self.runner = runner
         task = Task {
             do {
                 try Task.checkCancellation()
                 let worker = Task.detached(priority:.userInitiated) {
-                    try await ConversionEngine.convert(source, to:format, runner:runner)
+                    try await operation(runner)
                 }
                 let output = try await withTaskCancellationHandler(operation: {
                     try await worker.value
                 }, onCancel: { worker.cancel(); runner.cancel() })
-                if !Task.isCancelled { completed(output) }
+                if !Task.isCancelled { completed(output); if closeEditor { editor?.close() } }
             } catch is CancellationError {} catch { reportError(error,present:!background) }
             busy = false; self.runner = nil; task = nil
         }

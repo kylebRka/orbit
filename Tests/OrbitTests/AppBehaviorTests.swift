@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import Carbon
+import AVFoundation
 import OrbitCore
 @testable import Orbit
 
@@ -122,5 +123,89 @@ final class AppBehaviorTests:XCTestCase {
         let flagged=event()
         flagged.setParam(NSAppleEventDescriptor(boolean:true),forKeyword:keyAELaunchedAsLogInItem)
         XCTAssertTrue(AppDelegate.isLoginLaunch(flagged))
+    }
+
+    @MainActor func testFileMenusHaveRelevantToolsAndAllActions() {
+        let video=FileInspection(url:directory.appendingPathComponent("video.mov"),kind:.video,hasAudio:true,detail:"",formats:[.mp4])
+        let tools=WheelCatalog.items(for:video,page:.tools).compactMap(\.action)
+        XCTAssertTrue(tools.contains("trim")); XCTAssertFalse(tools.contains("crop"))
+        let image=FileInspection(url:directory.appendingPathComponent("image.png"),kind:.image,detail:"",formats:[.jpg])
+        XCTAssertFalse(WheelCatalog.items(for:image,page:.tools).contains { $0.action == "trim" })
+        XCTAssertEqual(Set(WheelCatalog.items(for:video,page:.actions).compactMap(\.action)),Set(["airdrop","float","copy","move","copyPath","terminal"]))
+        XCTAssertEqual(WheelPage.formats.next,.tools); XCTAssertEqual(WheelPage.actions.next,.formats)
+    }
+
+    @MainActor func testMoveRefusesExistingDestination() throws {
+        let source=try imageFile(), original=try Data(contentsOf:source)
+        let folder=directory.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:false)
+        let destination=folder.appendingPathComponent(source.lastPathComponent)
+        try Data("existing".utf8).write(to:destination)
+        XCTAssertThrowsError(try FileActions.move(source,to:folder))
+        XCTAssertEqual(try Data(contentsOf:source),original)
+        XCTAssertEqual(try Data(contentsOf:destination),Data("existing".utf8))
+        try FileManager.default.removeItem(at:destination)
+        XCTAssertEqual(try FileActions.move(source,to:folder),destination)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:source.path))
+        XCTAssertEqual(try Data(contentsOf:destination),original)
+    }
+
+    @MainActor func testWheelUsesNewCenterAndExposesThreeMenuButtons() {
+        _=NSApplication.shared
+        let wheel=WheelView(frame:NSRect(x:0,y:0,width:416,height:520))
+        let file=FileInspection(url:directory.appendingPathComponent("sound.wav"),kind:.audio,hasAudio:true,detail:"",formats:[.m4a,.mp3])
+        wheel.file=file; wheel.items=WheelCatalog.items(for:file,page:.formats)
+        wheel.track(NSPoint(x:208,y:140)); XCTAssertEqual(wheel.hovered,0)
+        wheel.track(NSPoint(x:208,y:258)); XCTAssertNil(wheel.hovered)
+        let buttons=wheel.accessibilityChildren() as? [WheelAccessibilityItem] ?? []
+        XCTAssertEqual(buttons.count,wheel.items.count+4)
+        var selected:WheelPage?
+        wheel.onPage={ selected=$0 }
+        XCTAssertTrue(buttons.last!.accessibilityPerformPress())
+        XCTAssertEqual(selected,.actions)
+    }
+
+    @MainActor func testTrimPreviewRangeAndWaveform() async throws {
+        guard let ffmpeg=CommandRunner.executable("ffmpeg") else { throw XCTSkip("FFmpeg for test fixture") }
+        let source=directory.appendingPathComponent("sound.wav")
+        _=try await CommandRunner().run(ffmpeg,["-v","error","-f","lavfi","-i","sine=frequency=440:duration=1.3333",source.path])
+        let file=try await ConversionEngine.inspect(source)
+        let preview=MediaPreview(file:file)
+        await preview.prepare()
+        defer { preview.stop() }
+        XCTAssertTrue(preview.ready); XCTAssertNil(preview.error)
+        XCTAssertEqual(preview.waveform.count,160)
+        XCTAssertGreaterThan(preview.waveform.max() ?? 0,0.9)
+        XCTAssertFalse(preview.setStart(-1)); XCTAssertFalse(preview.setEnd(0))
+        XCTAssertTrue(preview.setStart(0.25)); XCTAssertFalse(preview.setEnd(0.2))
+        XCTAssertTrue(preview.setEnd(MediaTime.parse(MediaTime.string(preview.duration))!))
+        XCTAssertLessThanOrEqual(preview.range.end,preview.duration)
+        XCTAssertTrue(preview.setEnd(1))
+        do {
+            let model=AppModel(); var opened=0; model.showWindow={ opened += 1 }
+            model.trim(file,range:preview.range,format:.m4a,muted:false)
+            try await finish(model)
+            XCTAssertNotNil(model.result); XCTAssertEqual(opened,0); XCTAssertFalse(model.showingError)
+        }
+    }
+
+    @MainActor func testUnsupportedVideoPreviewIsRemovedOnClose() async throws {
+        guard let ffmpeg=CommandRunner.executable("ffmpeg") else { throw XCTSkip("FFmpeg for test fixture") }
+        let source=directory.appendingPathComponent("video.mkv")
+        _=try await CommandRunner().run(ffmpeg,["-v","error","-f","lavfi","-i","testsrc2=size=96x64:rate=10:duration=0.5","-c:v","ffv1",source.path])
+        if (try? await AVURLAsset(url:source).load(.isPlayable)) == true { throw XCTSkip("This OS plays FFV1 natively") }
+        let temporary=FileManager.default.temporaryDirectory
+        func proxies() throws -> Set<URL> {
+            Set(try FileManager.default.contentsOfDirectory(at:temporary,includingPropertiesForKeys:nil).filter { $0.lastPathComponent.hasPrefix("orbit-preview-") })
+        }
+        let before=try proxies()
+        let preview=MediaPreview(file:try await ConversionEngine.inspect(source))
+        await preview.prepare()
+        XCTAssertTrue(preview.ready); XCTAssertNil(preview.error)
+        let created=try proxies().subtracting(before)
+        XCTAssertEqual(created.count,1)
+        preview.stop()
+        for url in created { XCTAssertFalse(FileManager.default.fileExists(atPath:url.path)) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath:source.path))
     }
 }

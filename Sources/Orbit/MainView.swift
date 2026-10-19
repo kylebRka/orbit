@@ -6,6 +6,7 @@ import ServiceManagement
 struct MainView: View {
     @ObservedObject var model:AppModel
     @State private var dropTarget=false
+    @State private var page=WheelPage.formats
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body:some View {
@@ -66,28 +67,46 @@ struct MainView: View {
                         .frame(width:64,height:64).background(Color.accentColor.opacity(0.08),in:RoundedRectangle(cornerRadius:17))
                         .overlay(RoundedRectangle(cornerRadius:17).stroke(Color.accentColor.opacity(0.17)))
                 }
-                HStack(spacing:0) {
+                if model.file == nil { HStack(spacing:0) {
                     VStack(alignment:.leading,spacing:16) {
                         Text(L("TAKE THE SHORT WAY","КОРОТКИЙ ПУТЬ")).font(.system(size:9,weight:.semibold)).tracking(1.7).foregroundStyle(.secondary)
                         step("01",L("Select a file in Finder","Выберите файл в Finder"))
                         step("02",L("Hold ⇧ and move outward","Зажмите ⇧ и ведите курсор"))
                         step("03",L("Release to convert","Отпустите для конвертации"))
-                        Text(L("Dragging? Drop onto a format.\nTab switches to image tools.","Перетаскиваете? Бросьте на формат.\nTab открывает инструменты.")).font(.system(size:10)).foregroundStyle(.secondary).lineSpacing(3)
+                        Text(L("⇧ Convert · ⌘ Tools · ⌃ Actions\nTab switches menus in the wheel.","⇧ Форматы · ⌘ Инструменты · ⌃ Действия\nTab переключает меню в круге.")).font(.system(size:10)).foregroundStyle(.secondary).lineSpacing(3)
                     }.padding(.leading,22).frame(width:235,alignment:.leading)
                     WheelPreview(file:model.file).frame(width:416,height:416).scaleEffect(0.66).frame(width:270,height:278).accessibilityHidden(true)
                     Spacer(minLength:0)
                 }
                 .frame(maxWidth:.infinity).background(Color.accentColor.opacity(0.035),in:RoundedRectangle(cornerRadius:18))
                 .overlay(RoundedRectangle(cornerRadius:18).stroke(Color.accentColor.opacity(0.09)))
+                }
                 fileCard
-                if let file=model.file, !file.formats.isEmpty {
+                if let file=model.file {
+                    HStack {
+                        Picker(L("File menu","Меню файла"),selection:$page) {
+                            ForEach(WheelPage.allCases) { item in Text(item.key+" "+item.title).tag(item) }
+                        }.pickerStyle(.segmented)
+                        Button(L("Open wheel","Открыть круг")) { model.showWheel?(file) }
+                    }.disabled(model.busy)
+                    if page != .formats {
+                        LazyVGrid(columns:[GridItem(.adaptive(minimum:155))],spacing:10) {
+                            ForEach(Array(WheelCatalog.items(for:file,page:page).enumerated()),id:\.offset) { _,item in
+                                Button { if let action=item.action { FileActions.perform(action,file:file,model:model) } } label: {
+                                    HStack(spacing:9) { Image(systemName:item.symbol).font(.system(size:18)).foregroundStyle(Color.accentColor); Text(item.title).font(.system(size:10,weight:.semibold)); Spacer(minLength:0) }
+                                        .padding(13).frame(maxWidth:.infinity).background(Color.accentColor.opacity(0.05),in:RoundedRectangle(cornerRadius:10))
+                                }.buttonStyle(.plain).disabled(model.busy)
+                            }
+                        }
+                    }
+                }
+                if page == .formats, let file=model.file, !file.formats.isEmpty {
                     HStack {
                         Text(L("Convert to","Формат")).font(.system(size:12)).foregroundStyle(.secondary)
                         Picker("",selection:$model.selectedFormat) {
                             ForEach(file.formats) { Text($0.title).tag(Optional($0)) }
                         }.labelsHidden().frame(width:115).disabled(model.busy)
                         Spacer()
-                        Button(L("Open wheel","Открыть круг")) { model.showWheel?(file) }.disabled(model.busy)
                         Button(L("Convert","Конвертировать")) { if let format=model.selectedFormat { model.convert(format) } }
                             .buttonStyle(.borderedProminent).disabled(model.busy || model.selectedFormat == nil)
                     }
@@ -104,6 +123,7 @@ struct MainView: View {
                 }.font(.system(size:10)).foregroundStyle(.secondary)
             }.padding(.horizontal,30).padding(.top,48).padding(.bottom,25)
         }
+        .onChange(of:model.file?.url) { _,_ in page = .formats }
     }
 
     func step(_ number:String,_ title:String) -> some View {
@@ -150,6 +170,7 @@ struct MainView: View {
                 Button(L("Refresh permissions","Проверить разрешения")) { model.refreshPermissions() }
                 Toggle(L("Pause global gesture","Приостановить глобальный жест"),isOn:$model.gesturePaused)
                 Text(L("Select exactly one file. Hold Shift, move into a sector and release Shift. During a drag, drop onto the sector instead. The center and outside the ring cancel.","Выберите ровно один файл. Зажмите Shift, наведите на сектор и отпустите Shift. При перетаскивании бросьте файл в сектор. Центр и область за кругом отменяют действие."))
+                Text(L("In the wheel: ⇧ Convert · ⌘ Tools · ⌃ Actions. Tab cycles menus. During a drag you can release the key: the wheel stays open until you drop or cancel.","В круге: ⇧ — форматы, ⌘ — инструменты, ⌃ — действия. Tab переключает меню. При перетаскивании можно отпустить клавишу: круг остаётся до броска или отмены."))
             }
             Section(L("Media engine","Медиадвижок")) {
                 Label(ConversionEngine.hasFFmpeg ? L("FFmpeg is ready","FFmpeg готов") : L("FFmpeg is optional","FFmpeg — дополнительный модуль"),systemImage:ConversionEngine.hasFFmpeg ? "checkmark.circle.fill" : "waveform")
@@ -161,7 +182,7 @@ struct MainView: View {
                 Label(L("Follows the macOS accent color and appearance","Системный акцентный цвет, светлая и тёмная темы"),systemImage:"circle.lefthalf.filled")
                 Text(L("No uploads, telemetry or stored file history. The last ten results are kept in memory until you quit. Originals are never replaced. Multi-page PDF images are saved to a new folder.","Без загрузок в сеть, телеметрии и истории на диске. Последние десять результатов хранятся в памяти до выхода. Исходники не заменяются. Страницы PDF сохраняются в новую папку."))
             }
-            Section { Text("Orbit 0.2.0 · macOS 15+").foregroundStyle(.secondary) }
+            Section { Text("Orbit 0.3.0 · macOS 15+").foregroundStyle(.secondary) }
         }.formStyle(.grouped).padding(.top,20)
     }
 

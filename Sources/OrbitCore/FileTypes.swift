@@ -34,8 +34,9 @@ public struct FileInspection: Sendable {
     public let hasAudio: Bool
     public let detail: String
     public let formats: [OutputFormat]
-    public init(url: URL, kind: FileKind, hasAudio: Bool = false, detail: String, formats: [OutputFormat]) {
-        self.url = url; self.kind = kind; self.hasAudio = hasAudio; self.detail = detail; self.formats = formats
+    public let duration: Double?
+    public init(url: URL, kind: FileKind, hasAudio: Bool = false, detail: String, formats: [OutputFormat], duration: Double? = nil) {
+        self.url = url; self.kind = kind; self.hasAudio = hasAudio; self.detail = detail; self.formats = formats; self.duration = duration
     }
 }
 

@@ -4,7 +4,7 @@ import AppKit
 func glassSurface(frame:NSRect, cornerRadius:CGFloat) -> NSView {
     if #available(macOS 26.0, *) {
         let glass=NSGlassEffectView(frame:frame)
-        glass.style = .clear
+        glass.style = .regular
         glass.cornerRadius=cornerRadius
         glass.contentView=NSView(frame:NSRect(origin:.zero,size:frame.size))
         return glass

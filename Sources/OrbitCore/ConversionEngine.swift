@@ -15,6 +15,7 @@ public enum ConversionEngine {
         let ext = url.pathExtension.lowercased()
         let kind: FileKind
         var audio = false
+        var duration: Double?
         var detail: String
         let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil)
         let isPDF = ext == "pdf" || imageSource.flatMap { CGImageSourceGetType($0) }.map { ($0 as String) == UTType.pdf.identifier } == true
@@ -38,6 +39,7 @@ public enum ConversionEngine {
                 let data = try await CommandRunner().run(probe, ["-v", "error", "-protocol_whitelist", "file,pipe", "-show_entries", "stream=codec_type:stream_disposition=attached_pic:format=duration", "-of", "json", url.path])
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let streams = json?["streams"] as? [[String: Any]] ?? []
+                duration = (json?["format"] as? [String: Any])?["duration"].flatMap { Double(String(describing:$0)) }
                 let video = streams.contains {
                     $0["codec_type"] as? String == "video" && ($0["disposition"] as? [String: Any])?["attached_pic"] as? Int != 1
                 }
@@ -50,12 +52,14 @@ public enum ConversionEngine {
                 audio = try await !asset.loadTracks(withMediaType: .audio).isEmpty
                 guard video || audio else { throw OrbitError.message("This media needs FFmpeg. Install it with: brew install ffmpeg") }
                 kind = video ? .video : .audio
+                duration = try await asset.load(.duration).seconds
             }
             detail = kind == .video ? (audio ? "Video + audio" : "Video · no audio") : "Audio"
         }
         let size = ByteCountFormatter.string(fromByteCount: Int64(values.fileSize ?? 0), countStyle: .file)
         return FileInspection(url: url, kind: kind, hasAudio: audio, detail: "\(detail) · \(size)",
-                              formats: FormatCatalog.formats(kind: kind, sourceExtension: ext, hasAudio: audio, ffmpeg: hasFFmpeg))
+                              formats: FormatCatalog.formats(kind: kind, sourceExtension: ext, hasAudio: audio, ffmpeg: hasFFmpeg),
+                              duration: duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil })
     }
 
     public static func convert(_ file: FileInspection, to format: OutputFormat, runner: CommandRunner) async throws -> URL {
@@ -87,23 +91,18 @@ public enum ConversionEngine {
                 }
             }
         case .audio, .video:
-            if hasFFmpeg, let executable = CommandRunner.executable("ffmpeg") {
-                _ = try await runner.run(executable, mediaArguments(input: file.url, output: temporary, format: format))
-            } else {
-                let asset = AVURLAsset(url: file.url)
-                let preset = format == .m4a ? AVAssetExportPresetAppleM4A : AVAssetExportPresetHighestQuality
-                guard let session = AVAssetExportSession(asset: asset, presetName: preset) else { throw OrbitError.message("This media cannot be exported by macOS. Install FFmpeg.") }
-                let type: AVFileType = format == .m4a ? .m4a : format == .mov ? .mov : .mp4
-                try await session.export(to: temporary, as: type)
-            }
+            try await exportMedia(file, to:temporary, format:format, runner:runner)
         }
         try Task.checkCancellation()
         return try OutputFiles.publish(temporary, beside: file.url, extension: isPages ? "pages" : format.rawValue,
                                        suffix: isPages ? "-\(format.rawValue)" : "")
     }
 
-    public static func mediaArguments(input: URL, output: URL, format: OutputFormat) -> [String] {
-        var arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-n", "-protocol_whitelist", "file,pipe", "-i", input.path]
+    public static func mediaArguments(input: URL, output: URL, format: OutputFormat, range: MediaRange? = nil, muted: Bool = false) -> [String] {
+        var arguments = ["-hide_banner", "-nostdin", "-loglevel", "error", "-n", "-protocol_whitelist", "file,pipe"]
+        if let range { arguments += ["-ss", String(range.start)] }
+        arguments += ["-i", input.path]
+        if let range { arguments += ["-t", String(range.length)] }
         switch format {
         case .mp4, .mov:
             arguments += ["-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-crf", "20", "-preset", "medium", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
@@ -113,7 +112,33 @@ public enum ConversionEngine {
         case .flac: arguments += ["-map", "0:a:0", "-vn", "-c:a", "flac"]
         default: break
         }
+        if muted { arguments += ["-an"] }
         return arguments + [output.path]
+    }
+
+    static func exportMedia(_ file:FileInspection, to output:URL, format:OutputFormat, runner:CommandRunner,
+                            range:MediaRange? = nil, muted:Bool = false, useFFmpeg:Bool = hasFFmpeg) async throws {
+        if useFFmpeg, let executable=CommandRunner.executable("ffmpeg") {
+            _ = try await runner.run(executable, mediaArguments(input:file.url,output:output,format:format,range:range,muted:muted))
+        } else {
+            let source=AVURLAsset(url:file.url)
+            var asset:AVAsset=source
+            if muted {
+                let composition=AVMutableComposition()
+                let duration=try await source.load(.duration)
+                for track in try await source.loadTracks(withMediaType:.video) {
+                    guard let target=composition.addMutableTrack(withMediaType:.video,preferredTrackID:kCMPersistentTrackID_Invalid) else { throw OrbitError.message("Cannot prepare video.") }
+                    try target.insertTimeRange(CMTimeRange(start:.zero,duration:duration),of:track,at:.zero)
+                    target.preferredTransform=try await track.load(.preferredTransform)
+                }
+                asset=composition
+            }
+            let preset=format == .m4a ? AVAssetExportPresetAppleM4A : AVAssetExportPresetHighestQuality
+            guard let session=AVAssetExportSession(asset:asset,presetName:preset) else { throw OrbitError.message("This media cannot be exported by macOS. Install FFmpeg.") }
+            if let range { session.timeRange=CMTimeRange(start:CMTime(seconds:range.start,preferredTimescale:60000),duration:CMTime(seconds:range.length,preferredTimescale:60000)) }
+            let type:AVFileType=format == .m4a ? .m4a : format == .mov ? .mov : .mp4
+            try await withTaskCancellationHandler(operation:{ try await session.export(to:output,as:type) },onCancel:{ session.cancelExport() })
+        }
     }
 
     public static func loadImage(_ url: URL) throws -> CGImage {
